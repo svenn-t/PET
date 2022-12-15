@@ -10,7 +10,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Positional arguments
-    parser.add_argument('init_file', type=str, help='init file (.pipt) for PIPT')
+    parser.add_argument('init_file', type=str, help='init file for PIPT')
     
     # Optional arguments
     parser.add_argument('-s', '--sim', type=str, dest='sim', help='simulator to use in PIPT', required=True)
@@ -19,7 +19,14 @@ def main():
     args = parser.parse_args()
 
     # Read config
-    da, fwd = read_config.read_txt(args.init_file)
+    if args.init_file.endswith('.pipt'):
+        da, fwd = read_config.read_txt(args.init_file)
+    elif args.init_file.endswith('.toml'):
+        da, fwd = read_config.read_toml(args.init_file)
+    elif args.init_file.endswith('.yaml'):
+        da, fwd = read_config.read_yaml(args.init_file)
+    else:
+        raise TypeError(f'\"{args.init_file.split(".")[-1]}\" is not a valid init_file format')
 
     # Import simulator class
     sim_class = getattr(import_module('simulator.' + '.'.join(args.sim.split('.')[:-1])), args.sim.split('.')[-1])
