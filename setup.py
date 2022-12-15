@@ -12,4 +12,5 @@ setup(
     install_requires=['numpy', 'scipy', 'matplotlib', 'h5py', 'mako', 'tqdm', 'PyWavelets', 
                       'psutil', 'pdoc3', 'pytest', 'pandas', 'p_tqdm', 'mat73','opencv-python','rips', 'tomli', 
                       'tomli-w', 'pyyaml'],
+    entry_points={'console_scripts' : ['pipt=pipt.pipt_bin:main']}
 )
