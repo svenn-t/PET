@@ -9,19 +9,27 @@ import pickle
 
 def main():
     # Setup argparse
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description='Run PIPT using specifications in the init_file and simulator defined by -s (or --sim).', 
+        usage='%(prog)s [options] init_file -s simulator',
+        formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=35))
 
     # Positional arguments
     parser.add_argument('init_file', type=str, help='init file for PIPT')
     
+    # --sim is really a positional argument
+    group = parser.add_argument_group('required')
+    group.add_argument('-s', '--sim', type=str, metavar='', dest='sim', 
+        help='simulator to use in PIPT', required=True)
+
     # Optional arguments
-    parser.add_argument('-s', '--sim', type=str, metavar='', dest='sim', help='simulator to use in PIPT', required=True)
-    parser.add_argument('--save', type=str, default='state', choices=['state'],
+    group2 = parser.add_argument_group('options')
+    group2.add_argument('--save', type=str, default='state', choices=['state'],
         help='what results to save (default = state)')
-    parser.add_argument('--save-name', type=str, metavar='', default='pipt_results',
+    group2.add_argument('--save-name', type=str, metavar='', default='pipt_results',
         help='results save name (default = \"pipt_results\")')
-    parser.add_argument('--save-fmt', type=str, default='numpy', choices=['numpy', 'pickle'],
-        help='save serialization format (default = numpy)')
+    group2.add_argument('--save-fmt', type=str, default='numpy', choices=['numpy', 'pickle'],
+        help='serialization method (default = numpy)')
 
     # Parse command-line arguments
     args = parser.parse_args()
