@@ -3,6 +3,8 @@ from pipt import pipt_init
 from pipt.loop.assimilation import Assimilate
 from input_output import read_config
 from importlib import import_module
+import numpy as np
+import pickle
 
 
 def main():
@@ -13,7 +15,13 @@ def main():
     parser.add_argument('init_file', type=str, help='init file for PIPT')
     
     # Optional arguments
-    parser.add_argument('-s', '--sim', type=str, dest='sim', help='simulator to use in PIPT', required=True)
+    parser.add_argument('-s', '--sim', type=str, metavar='', dest='sim', help='simulator to use in PIPT', required=True)
+    parser.add_argument('--save', type=str, default='state', choices=['state'],
+        help='what results to save (default = state)')
+    parser.add_argument('--save-name', type=str, metavar='', default='pipt_results',
+        help='results save name (default = \"pipt_results\")')
+    parser.add_argument('--save-fmt', type=str, default='numpy', choices=['numpy', 'pickle'],
+        help='save serialization format (default = numpy)')
 
     # Parse command-line arguments
     args = parser.parse_args()
@@ -38,3 +46,13 @@ def main():
 
     # Run assimilation
     assimilation.run()
+
+    # Serialize results according to cli args
+    savename = args.save_name
+    if args.save_fmt == 'numpy':
+        if args.save == 'state':
+            np.savez(savename + '.npz', **assimilation.ensemble.state)
+    elif args.save_fmt == 'pickle':
+        with open(savename + '.p', 'wb') as fid:
+            if args.save == 'state':
+                pickle.dump(assimilation.ensemble.state, fid)
