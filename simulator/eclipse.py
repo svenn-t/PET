@@ -72,7 +72,18 @@ class eclipse:
         self.file = filename
         self.options = options
 
+        # Internal variables
         self.upscale = None
+        self.xc = None
+        self.zc = None
+        self.xb = None
+        self.zb = None
+        self.dimens = None
+        self.fixed_permz = None
+        self.fixed_struct_val = None
+        self.fixed_scale = None
+        self.facies = False
+
         # If input option 1 is selected
         if self.input_dict is not None:
             self._extInfoInputDict()
@@ -212,6 +223,40 @@ class eclipse:
             # if not initiallize as list with one element
             self.multilevel = [False]
 
+        # Cartesian cell center keywords
+        if 'xc' in self.input_dict:
+            # Load cell centers
+            self.xc = np.load(self.input_dict['xc'])
+        if 'zc' in self.input_dict:
+            # Load cell centers
+            self.zc = np.load(self.input_dict['zc'])
+
+        # Cartesian grid bound
+        if 'xb' in self.input_dict:
+            self.xb = np.array(self.input_dict['xb'])
+        if 'zb' in self.input_dict:
+            self.zb = np.array(self.input_dict['zb'])
+
+        # Grid dimension
+        if 'dimens' in self.input_dict:
+            self.dimens = self.input_dict['dimens']
+
+        # Fixed permz value
+        if 'fixed_permz' in self.input_dict:
+            self.fixed_permz = self.input_dict['fixed_permz']
+        
+        # Fixed structure value
+        if 'fixed_struct_val' in self.input_dict:
+            self.fixed_struct_val = self.input_dict['fixed_struct_val']
+        
+        # Fixed sine scale value
+        if 'fixed_scale' in self.input_dict:
+            self.fixed_scale = self.input_dict['fixed_scale']
+
+        # Structure indicates facies border (default = False)
+        if 'facies' in self.input_dict:
+            self.facies = True if self.input_dict['facies'].lower() in ['yes', 'true', 'on'] else False
+
     def setup_fwd_run(self, **kwargs):
         """
         Setup the simulator.
@@ -299,6 +344,8 @@ class eclipse:
                 del self.coarse
 
         # start by generating the .DATA file, using the .mako template situated in ../folder
+        if 'scale' in state or 'offset' in state or 'struct_val' in state:
+            state['struct'] = self.map_structure(state, facies=self.facies)
         self._runMako(folder, state)
         success = False
         rerun = self.rerun
@@ -734,6 +781,50 @@ class eclipse:
 
         return image, weights, allow_merge, end_ctrl
 
+    def map_structure(self, state, facies=False):
+        """
+        Map a geological structures/barriers or facies areas to simulation grid
+        """
+        # Extract parameters from state or input
+        if 'struct_val' in state:
+            struct_val = np.exp(state['struct_val'][0])
+        elif 'struct_val' not in state and hasattr(self, 'fixed_struct_val'):
+            struct_val = self.fixed_struct_val
+        else:
+            raise ValueError('No \"struct_val\" in state nor \"FIXED_STRUCT_VAL\" in input file!')
+        
+        if 'scale' in state:
+            scale = -np.exp(state['scale'][0])
+        elif 'struct_val' not in state and hasattr(self, 'fixed_struct_val'):
+            scale = self.fixed_scale
+        else:
+            raise ValueError('No \"scale\" in state nor \"FIXED_SCALE\" in input file!')
+
+        # Calculate sine-structure
+        z_sine = self._sine(xc=self.xc, xb=self.xb, alpha=scale, beta=state['offset'][0])
+
+        # Map structure values, boundary or facies areas, according to sine function
+        if facies:
+            val = struct_val[0] * np.ones((self.dimens[2], self.dimens[1]))
+        else:
+            val = self.fixed_permz * np.ones((self.dimens[2], self.dimens[1]))
+        for i, z in enumerate(z_sine):
+            ind = np.argmin(np.abs(z - self.zc))
+            if facies:
+                val[ind:, i] = struct_val[1]
+            else:
+                val[ind, i] = struct_val
+        
+        val = np.tile(val.T, (self.dimens[0], 1, 1)).flatten(order='F')
+        return val
+        
+    def _sine(self, xc, xb, alpha, beta):
+        # Normalize x to [0, pi]
+        xct = ((xc - xb[0]) / (xb[1] - xb[0])) * np.pi
+
+        # Calculate sine-structure
+        return alpha * np.sin(xct) + beta
+
     def _runMako(self, folder, state):
         """
         Read the mako template (.mako) file from ../folder, and render the correct data file (.DATA) in folder.
@@ -962,7 +1053,7 @@ class eclipse:
                 if len(self.num_act) <= member:
                     self.num_act.extend([active_cells])
 
-        return yFlow
+        return yFlow.data
 
     def store_fwd_debug(self, assimstep):
         if 'fwddebug' in self.keys_fwd:
