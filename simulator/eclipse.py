@@ -11,8 +11,13 @@ import datetime as dt
 from scipy import interpolate
 from subprocess import call, DEVNULL
 from misc import ecl, grdecl
+from misc.grid_tools import GridTool
 from shutil import rmtree, copytree  # rmtree for removing folders
 import time
+from functools import partial
+from resdata import ResDataType
+from resdata.resfile import ResdataKW
+import cwrap
 # import rips
 
 # Internal imports
@@ -77,12 +82,21 @@ class eclipse:
         self.xc = None
         self.zc = None
         self.xb = None
+        self.yb = None
         self.zb = None
         self.dimens = None
         self.fixed_permz = None
         self.fixed_struct_val = None
         self.fixed_scale = None
         self.facies = False
+        self.k_layer = None
+        self.k_layer_thick = None
+        self.grdecl_file = None
+        self.fixed_struct_a = None
+        self.fixed_struct_b = None
+        self.fixed_struct_c = None
+        self.fixed_struct_d = None
+        self.redistribute_layers = False
 
         # If input option 1 is selected
         if self.input_dict is not None:
@@ -234,6 +248,8 @@ class eclipse:
         # Cartesian grid bound
         if 'xb' in self.input_dict:
             self.xb = np.array(self.input_dict['xb'])
+        if 'yb' in self.input_dict:
+            self.yb = np.array(self.input_dict['yb'])
         if 'zb' in self.input_dict:
             self.zb = np.array(self.input_dict['zb'])
 
@@ -255,7 +271,36 @@ class eclipse:
 
         # Structure indicates facies border (default = False)
         if 'facies' in self.input_dict:
-            self.facies = True if self.input_dict['facies'].lower() in ['yes', 'true', 'on'] else False
+            self.facies = self.input_dict['facies'].lower() in ['yes', 'true', 'on']
+
+        # Structure k-layer to adjust (OBS: Python 0-indexing vs Fortran/Eclipse 1-indexing)
+        if 'k_layer' in self.input_dict:
+            self.k_layer = int(self.input_dict['k_layer']) - 1
+        
+        # Fixed structure k-layer thickness
+        if 'k_layer_thick' in self.input_dict:
+            self.k_layer_thick = self.input_dict['k_layer_thick']
+        
+        # Structure template grdecl file
+        if 'grdecl_file' in self.input_dict:
+            self.grdecl_file = self.input_dict['grdecl_file']
+        
+        # Fixed structure value
+        if 'fixed_struct_a' in self.input_dict:
+            self.fixed_struct_a = self.input_dict['fixed_struct_a']
+        # Fixed structure value
+        if 'fixed_struct_b' in self.input_dict:
+            self.fixed_struct_b = self.input_dict['fixed_struct_b']
+        # Fixed structure value
+        if 'fixed_struct_c' in self.input_dict:
+            self.fixed_struct_c = self.input_dict['fixed_struct_c']
+        # Fixed structure value
+        if 'fixed_struct_d' in self.input_dict:
+            self.fixed_struct_d = self.input_dict['fixed_struct_d']
+        
+        # Redistribute layers in ZCORN generation
+        if 'redistribute_layers' in self.input_dict:
+            self.redistribute_layers = bool(self.input_dict['redistribute_layers'])
 
     def setup_fwd_run(self, **kwargs):
         """
@@ -343,9 +388,13 @@ class eclipse:
                 # removed
                 del self.coarse
 
-        # start by generating the .DATA file, using the .mako template situated in ../folder
+        # Structure related methods
         if 'scale' in state or 'offset' in state or 'struct_val' in state:
             state['struct'] = self.map_structure(state, facies=self.facies)
+        if self.grdecl_file is not None:
+            self.make_grdecl_from_structure(state, folder)
+
+        # start by generating the .DATA file, using the .mako template situated in ../folder
         self._runMako(folder, state)
         success = False
         rerun = self.rerun
@@ -824,6 +873,92 @@ class eclipse:
 
         # Calculate sine-structure
         return alpha * np.sin(xct) + beta
+    
+    def make_grdecl_from_structure(self, state, folder):
+        # Instantiate the GridTool class
+        gt = GridTool(self.grdecl_file, fixed_layer_thickness=self.k_layer_thick)
+
+        # Get a, b, c, and d values from input or state
+        if 'a' in state:
+            a = state['a'][0]
+        elif hasattr(self, 'fixed_struct_a'):
+            a = self.fixed_struct_a
+        else:
+            raise ValueError('\"a\" not in state nor in \"FIXED_STRUCT_A\"')
+        
+        if 'b' in state:
+            b = state['b'][0]
+        elif hasattr(self, 'fixed_struct_b'):
+            b = self.fixed_struct_b
+        else:
+            raise ValueError('\"b\" not in state nor in \"FIXED_STRUCT_B\"')
+        
+        if 'c' in state:
+            c = state['c'][0]
+        elif hasattr(self, 'fixed_struct_c'):
+            c = self.fixed_struct_c
+        else:
+            raise ValueError('\"c\" not in state nor in \"FIXED_STRUCT_C\"')
+        
+        if 'd' in state:
+            d = state['d'][0]
+        elif hasattr(self, 'fixed_struct_d'):
+            d = self.fixed_struct_d
+        else:
+            raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_D\"')
+
+        # Make sine function for pillar intersection search
+        surf = partial(self._sine2, a=a, b=b, c=c, d=d, xb=self.xb, yb=self.yb)
+
+        # Get intersection value of structure on each pillar (forms the basis of new ZCORN)
+        new_zcorn_pillar = np.zeros((gt.ny + 1, gt.nx + 1))
+        for jp in range(gt.ny + 1):
+            for ip in range(gt.nx + 1):
+                new_zcorn_pillar[jp, ip] = gt.pillar_intersection(surf, ip, jp)
+
+        # Get the distance between new and old zcorns at the k-layer we want to change
+        h = gt.zcorn_layer_distance_simple(new_zcorn_pillar, self.k_layer)
+        
+        # Adjust zcorn in layer k
+        gt.move_zcorn_layer(self.k_layer, h, redistribute=self.redistribute_layers)
+
+        # Write GRDECL file
+        self._write_grdecl(gt, folder)
+
+    def _write_grdecl(self, gt, folder):
+        # Open template grdecl file and write to new grdecl file inside run folder
+        with cwrap.open(self.grdecl_file, 'r') as fid, cwrap.open(folder + self.file + '.GRDECL', 'w') as fid2:
+            # SPECGRID
+            specgrid = ResdataKW.read_grdecl(fid, 'SPECGRID', rd_type=ResDataType.RD_INT, strict=False)
+            specgrid.write_grdecl(fid2)
+
+            # COORD
+            coord = ResdataKW.read_grdecl(fid, 'COORD')
+            coord.write_grdecl(fid2)
+
+            # ACTNUM
+            actnum = ResdataKW.read_grdecl(fid, "ACTNUM", rd_type=ResDataType.RD_INT)
+            actnum.write_grdecl(fid2)
+
+            # MAPAXES (if present)
+            try:
+                mapaxes = ResdataKW.read_grdecl(fid, "MAPAXES")
+                mapaxes.write_grdecl(fid2)
+            except ValueError:
+                pass
+        
+        # Append ZCORN (with structure change) at the end using regular Python open()
+        zcorn = gt.get_zcorn()
+        with open(folder + self.file + '.GRDECL', 'a') as fid2:
+            fid2.write('ZCORN\n')
+            np.savetxt(fid2, np.reshape(zcorn, shape=(np.prod(zcorn.shape), 1)), fmt='%7.2f')
+            fid2.write('/\n')
+
+    def _sine2(self, x, y, a, b, c, d, xb, yb):
+        # To avoid rapidly occuring sine-waves, we normalize sine to multiples of pi (using b and c)
+        xt = ((x - xb[0]) / (xb[1] - xb[0])) * np.pi
+        yt = ((y - yb[0]) / (yb[1] - yb[0])) * np.pi
+        return -a * np.sin(b * xt) * np.sin(c * yt) + d
 
     def _runMako(self, folder, state):
         """
