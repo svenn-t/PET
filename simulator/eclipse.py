@@ -96,7 +96,9 @@ class eclipse:
         self.fixed_struct_b = None
         self.fixed_struct_c = None
         self.fixed_struct_d = None
+        self.fixed_struct_z0 = None
         self.redistribute_layers = False
+        self.surface = None
 
         # If input option 1 is selected
         if self.input_dict is not None:
@@ -288,19 +290,30 @@ class eclipse:
         # Fixed structure value
         if 'fixed_struct_a' in self.input_dict:
             self.fixed_struct_a = self.input_dict['fixed_struct_a']
+        
         # Fixed structure value
         if 'fixed_struct_b' in self.input_dict:
             self.fixed_struct_b = self.input_dict['fixed_struct_b']
+        
         # Fixed structure value
         if 'fixed_struct_c' in self.input_dict:
             self.fixed_struct_c = self.input_dict['fixed_struct_c']
+        
         # Fixed structure value
         if 'fixed_struct_d' in self.input_dict:
             self.fixed_struct_d = self.input_dict['fixed_struct_d']
         
+        # Fixed structure value
+        if 'fixed_struct_z0' in self.input_dict:
+            self.fixed_struct_z0 = self.input_dict['fixed_struct_z0']
+        
         # Redistribute layers in ZCORN generation
         if 'redistribute_layers' in self.input_dict:
             self.redistribute_layers = bool(self.input_dict['redistribute_layers'])
+        
+        # Choice of surface equation
+        if 'surface' in self.input_dict:
+            self.surface = self.input_dict['surface']
 
     def setup_fwd_run(self, **kwargs):
         """
@@ -880,44 +893,68 @@ class eclipse:
 
         # Get a, b, c, and d values from input or state
         if 'a' in state:
-            a = state['a'][0]
-        elif hasattr(self, 'fixed_struct_a'):
+            a = np.exp(state['a'][0]) if self.surface == 'plane' else state['a'][0]
+        elif self.fixed_struct_a is not None:
             a = self.fixed_struct_a
         else:
             raise ValueError('\"a\" not in state nor in \"FIXED_STRUCT_A\"')
         
         if 'b' in state:
-            b = state['b'][0]
-        elif hasattr(self, 'fixed_struct_b'):
+            b = np.exp(state['b'][0]) if self.surface == 'plane' else state['b'][0]
+        elif self.fixed_struct_b is not None:
             b = self.fixed_struct_b
         else:
             raise ValueError('\"b\" not in state nor in \"FIXED_STRUCT_B\"')
         
-        if 'c' in state:
-            c = state['c'][0]
-        elif hasattr(self, 'fixed_struct_c'):
-            c = self.fixed_struct_c
-        else:
-            raise ValueError('\"c\" not in state nor in \"FIXED_STRUCT_C\"')
+        # sine2 specific parameters
+        if self.surface == 'sine2':
+            if 'c' in state:
+                c = state['c'][0]
+            elif self.fixed_struct_c is not None:
+                c = self.fixed_struct_c
+            else:
+                raise ValueError('\"c\" not in state nor in \"FIXED_STRUCT_C\"')
         
-        if 'd' in state:
-            d = state['d'][0]
-        elif hasattr(self, 'fixed_struct_d'):
-            d = self.fixed_struct_d
+            if 'd' in state:
+                d = state['d'][0]
+            elif self.fixed_struct_d is not None:
+                d = self.fixed_struct_d
+            else:
+                raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_D\"')
+            
+        # plane specific parameters
+        elif self.surface == 'plane':
+            if 'z0' in state:
+                z0 = state['z0'][0]
+            elif self.fixed_struct_z0 is not None:
+                z0 = self.fixed_struct_z0
+            else:
+                raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_Z0\"')
+
+        # Make sine function of (x,y) for pillar intersection search
+        if self.surface == 'sine2': 
+            surf = partial(self._sine2, a=a, b=b, c=c, d=d, xb=self.xb, yb=self.yb)
+
+        # Make plane a function of (x,y) for pillar intersection search
+        elif self.surface == 'plane':
+            x0 = sum(self.xb) / 2  # mid point of plane
+            y0 = sum(self.yb) / 2  # mid point of plane
+            surf = partial(self._plane, a=a, b=b, x0=x0, y0=y0, z0=z0)
+
         else:
-            raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_D\"')
+            raise NotImplementedError(f'Equation for structure = {self.surface} not implemented!')
 
-        # Make sine function for pillar intersection search
-        surf = partial(self._sine2, a=a, b=b, c=c, d=d, xb=self.xb, yb=self.yb)
-
-        # Get intersection value of structure on each pillar (forms the basis of new ZCORN)
+        # Get intersection value of structure on each pillar (forms the basis for new ZCORN)
         new_zcorn_pillar = np.zeros((gt.ny + 1, gt.nx + 1))
         for jp in range(gt.ny + 1):
             for ip in range(gt.nx + 1):
                 new_zcorn_pillar[jp, ip] = gt.pillar_intersection(surf, ip, jp)
 
         # Get the distance between new and old zcorns at the k-layer we want to change
-        h = gt.zcorn_layer_distance_simple(new_zcorn_pillar, self.k_layer)
+        # NOTE: if we don't have a fixed thickness for layer k, we move the bottom surface by same distance as top,
+        # thereby retaining original DZ in layer k  
+        tile_to_bottom = self.k_layer_thick is None
+        h = gt.zcorn_layer_distance_simple(new_zcorn_pillar, self.k_layer, tile_to_bottom=tile_to_bottom)
         
         # Adjust zcorn in layer k
         gt.move_zcorn_layer(self.k_layer, h, redistribute=self.redistribute_layers)
@@ -959,6 +996,20 @@ class eclipse:
         xt = ((x - xb[0]) / (xb[1] - xb[0])) * np.pi
         yt = ((y - yb[0]) / (yb[1] - yb[0])) * np.pi
         return -a * np.sin(b * xt) * np.sin(c * yt) + d
+    
+    def _plane(self, x, y, a, b, x0, y0, z0):
+        """
+        General equation for a plane:
+
+            A*(x-x0) + B*(y-y0) + C*(z-z0) = 0
+        
+        where (x0,y0,z0) = origo. Rearranging for z:
+        
+            z = -A/c*(x-x0) - B/c*(y-y0) + z0
+        
+        In the code we use a=A/c and b=B/c
+        """
+        return a * (x0 - x) + b * (y0 - y) + z0
 
     def _runMako(self, folder, state):
         """
