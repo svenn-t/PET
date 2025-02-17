@@ -27,14 +27,43 @@ class GridTool:
         Move corners in a k-layer up/down according to a vector input h.
         NOTE: if there is a fixed layer thickness, h must be shape = (nx, 2, ny, 2), otherwise shape = (2, nx, 2, ny, 2)
         """
-        # Add h to zcorn all corners in the layer.
-        # NOTE: If a fixed layer thickness has been set, we only move top corners; otherwise we move both top and
-        # corners using h
+        # Add h to zcorn at layer k, but ensure that it does not exceed original grid bounds
+        tiled_zcorn_top = np.tile(self.zcorn[0, 0, :, :, :, :], (2, 1, 1, 1, 1))
+        tiled_zcorn_bot = np.tile(self.zcorn[self.nz - 1, 1, :, :, :, :], (2, 1, 1, 1, 1))
+        
         if self.layer_thick is None:
-            self.zcorn[k, :, :, :, :, :] += h
+            # Find cells that exceed top/bottom bounds
+            top_grid_prob = self.zcorn[k, :, :, :, :, :] + h < tiled_zcorn_top
+            bot_grid_prob = self.zcorn[k, :, :, :, :, :] + h > tiled_zcorn_bot
+
+            # Set exceeding cells to bounding zcorn values
+            if np.any(top_grid_prob):
+                self.zcorn[k, top_grid_prob] = tiled_zcorn_top[top_grid_prob]
+            if np.any(bot_grid_prob):
+                self.zcorn[k, bot_grid_prob] = tiled_zcorn_bot[bot_grid_prob]
+            
+            # Change cells with h for cells that have not exceeded bounds
+            no_prob = np.logical_and(~top_grid_prob, ~bot_grid_prob)
+            self.zcorn[k, no_prob] += h[no_prob]
+            
         else:
-            self.zcorn[k, 0, :, :, :, :] += h
-            self.zcorn[k, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :] + self.layer_thick
+            # Find cells that exceed top/bottom bounds.
+            top_grid_prob = self.zcorn[k, 0, :, :, :, :] + h < tiled_zcorn_top[0]
+            bot_grid_prob_0 = self.zcorn[k, 0, :, :, :, : ] + h > tiled_zcorn_bot[0]
+            bot_grid_prob_1 = self.zcorn[k, 0, :, :, :, :] + h + self.layer_thick > tiled_zcorn_bot[0]
+
+            #Set exceeding cells to bounding zcorn values
+            if np.any(top_grid_prob):
+                self.zcorn[k, 0, top_grid_prob] = tiled_zcorn_top[0, top_grid_prob]
+            if np.any(bot_grid_prob_0):
+                self.zcorn[k, 0, bot_grid_prob_0] = tiled_zcorn_bot[0, bot_grid_prob_0]
+            if np.any(bot_grid_prob_1):
+                self.zcorn[k, 1, bot_grid_prob_1] = tiled_zcorn_bot[0, bot_grid_prob_1]
+            
+            #Change cells with h and layer_thick (constant) for cells that have not exceeded bounds
+            no_prob_0 = np.logical_and(~top_grid_prob, ~bot_grid_prob_0)
+            self.zcorn[k, 0, no_prob_0] += h[no_prob_0]
+            self.zcorn[k, 1, ~bot_grid_prob_1] = self.zcorn[k, 0, ~bot_grid_prob_1] + self.layer_thick
 
         # Redistribute zcorns above and below layer k
         if redistribute:
@@ -47,14 +76,14 @@ class GridTool:
                 self.zcorn[layer, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :] + i * h_over
 
             # Layers below layer k
-            h_bel = (self.zcorn[k, 0, :, :, :, :] - self.zcorn[self.nz - 1, 0, :, :, :, :]) / (k - self.nz)
+            h_bel = (self.zcorn[self.nz - 1, 1, :, :, :, :] - self.zcorn[k, 1, :, :, :, :]) / (self.nz - k - 1)
 
             # Loop over layers below and add h_bel
             for i, layer in enumerate(range(k + 1, self.nz)):
                 self.zcorn[layer, 0, :, :, :, :] = self.zcorn[k, 1, :, :, :, :] + i * h_bel
                 self.zcorn[layer, 1, :, :, :, :] = self.zcorn[k, 1, :, :, :, :] + (i + 1) * h_bel
 
-        # Layer k may disappear if h is too large
+        # Move top and bottom of layers k + 1 and k - 1 to align with layer k
         else:
             # Additionally, move bottom corners in layer above (k - 1) and top corners in layer below (k + 1)
             self.zcorn[k - 1, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :]
