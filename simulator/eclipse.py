@@ -84,6 +84,8 @@ class eclipse:
         self.xb = None
         self.yb = None
         self.zb = None
+        self.x0 = None
+        self.y0 = None
         self.dimens = None
         self.fixed_permz = None
         self.fixed_struct_val = None
@@ -314,6 +316,12 @@ class eclipse:
         # Choice of surface equation
         if 'surface' in self.input_dict:
             self.surface = self.input_dict['surface']
+
+        # Midpoint of plane surface
+        if 'x0' in self.input_dict:
+            self.x0 = self.input_dict['x0']
+        if 'y0' in self.input_dict:
+            self.y0 = self.input_dict['y0']
 
     def setup_fwd_run(self, **kwargs):
         """
@@ -891,71 +899,75 @@ class eclipse:
         # Instantiate the GridTool class
         gt = GridTool(self.grdecl_file, fixed_layer_thickness=self.k_layer_thick)
 
-        # Get a, b, c, and d values from input or state
-        if 'a' in state:
-            a = np.exp(state['a'][0]) if self.surface == 'plane' else state['a'][0]
-        elif self.fixed_struct_a is not None:
-            a = self.fixed_struct_a
-        else:
-            raise ValueError('\"a\" not in state nor in \"FIXED_STRUCT_A\"')
-        
-        if 'b' in state:
-            b = np.exp(state['b'][0]) if self.surface == 'plane' else state['b'][0]
-        elif self.fixed_struct_b is not None:
-            b = self.fixed_struct_b
-        else:
-            raise ValueError('\"b\" not in state nor in \"FIXED_STRUCT_B\"')
-        
-        # sine2 specific parameters
-        if self.surface == 'sine2':
-            if 'c' in state:
-                c = state['c'][0]
-            elif self.fixed_struct_c is not None:
-                c = self.fixed_struct_c
+        # If h is not a state variable, we must calculate intersections between surface and pillars 
+        if 'h' not in state:
+            # Get a, b, c, and d values from input or state
+            if 'a' in state:
+                a = np.exp(state['a'][0]) if self.surface == 'plane' else state['a'][0]
+            elif self.fixed_struct_a is not None:
+                a = self.fixed_struct_a
             else:
-                raise ValueError('\"c\" not in state nor in \"FIXED_STRUCT_C\"')
-        
-            if 'd' in state:
-                d = state['d'][0]
-            elif self.fixed_struct_d is not None:
-                d = self.fixed_struct_d
-            else:
-                raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_D\"')
+                raise ValueError('\"a\" not in state nor in \"FIXED_STRUCT_A\"')
             
-        # plane specific parameters
-        elif self.surface == 'plane':
-            if 'z0' in state:
-                z0 = state['z0'][0]
-            elif self.fixed_struct_z0 is not None:
-                z0 = self.fixed_struct_z0
+            if 'b' in state:
+                b = np.exp(state['b'][0]) if self.surface == 'plane' else state['b'][0]
+            elif self.fixed_struct_b is not None:
+                b = self.fixed_struct_b
             else:
-                raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_Z0\"')
-
-        # Make sine function of (x,y) for pillar intersection search
-        if self.surface == 'sine2': 
-            surf = partial(self._sine2, a=a, b=b, c=c, d=d, xb=self.xb, yb=self.yb)
-
-        # Make plane a function of (x,y) for pillar intersection search
-        elif self.surface == 'plane':
-            x0 = sum(self.xb) / 2  # mid point of plane
-            y0 = sum(self.yb) / 2  # mid point of plane
-            surf = partial(self._plane, a=a, b=b, x0=x0, y0=y0, z0=z0)
-
-        else:
-            raise NotImplementedError(f'Equation for structure = {self.surface} not implemented!')
-
-        # Get intersection value of structure on each pillar (forms the basis for new ZCORN)
-        new_zcorn_pillar = np.zeros((gt.ny + 1, gt.nx + 1))
-        for jp in range(gt.ny + 1):
-            for ip in range(gt.nx + 1):
-                new_zcorn_pillar[jp, ip] = gt.pillar_intersection(surf, ip, jp)
-
-        # Get the distance between new and old zcorns at the k-layer we want to change
-        # NOTE: if we don't have a fixed thickness for layer k, we move the bottom surface by same distance as top,
-        # thereby retaining original DZ in layer k  
-        tile_to_bottom = self.k_layer_thick is None
-        h = gt.zcorn_layer_distance_simple(new_zcorn_pillar, self.k_layer, tile_to_bottom=tile_to_bottom)
+                raise ValueError('\"b\" not in state nor in \"FIXED_STRUCT_B\"')
+            
+            # sine2 specific parameters
+            if self.surface == 'sine2':
+                if 'c' in state:
+                    c = state['c'][0]
+                elif self.fixed_struct_c is not None:
+                    c = self.fixed_struct_c
+                else:
+                    raise ValueError('\"c\" not in state nor in \"FIXED_STRUCT_C\"')
+            
+                if 'd' in state:
+                    d = state['d'][0]
+                elif self.fixed_struct_d is not None:
+                    d = self.fixed_struct_d
+                else:
+                    raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_D\"')
+                
+            # plane specific parameters
+            elif self.surface == 'plane':
+                if 'z0' in state:
+                    z0 = state['z0'][0]
+                elif self.fixed_struct_z0 is not None:
+                    z0 = self.fixed_struct_z0
+                else:
+                    raise ValueError('\"d\" not in state nor in \"FIXED_STRUCT_Z0\"')
         
+            # Make sine function of (x,y) for pillar intersection search
+            if self.surface == 'sine2': 
+                surf = partial(self._sine2, a=a, b=b, c=c, d=d, xb=self.xb, yb=self.yb)
+
+            # Make plane a function of (x,y) for pillar intersection search
+            elif self.surface == 'plane':
+                surf = partial(self._plane, a=a, b=b, x0=self.x0, y0=self.y0, z0=z0)
+
+            else:
+                raise NotImplementedError(f'Equation for structure = {self.surface} not implemented!')
+
+            # Get intersection value of structure on each pillar (forms the basis for new ZCORN)
+            new_zcorn_pillar = np.zeros((gt.ny + 1, gt.nx + 1))
+            for jp in range(gt.ny + 1):
+                for ip in range(gt.nx + 1):
+                    new_zcorn_pillar[jp, ip] = gt.pillar_intersection(surf, ip, jp)
+
+            # Get the distance between new and old zcorns at the k-layer we want to change
+            # NOTE: if we don't have a fixed thickness for layer k, we move the bottom surface by same distance as top,
+            # thereby retaining original DZ in layer k  
+            tile_to_bottom = self.k_layer_thick is None
+            h = gt.zcorn_layer_distance_simple(new_zcorn_pillar, self.k_layer, tile_to_bottom=tile_to_bottom)
+        
+        # h is a state variable
+        else:
+            h = state['h'][0]
+
         # Adjust zcorn in layer k
         gt.move_zcorn_layer(self.k_layer, h, redistribute=self.redistribute_layers)
 
