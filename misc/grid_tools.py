@@ -13,12 +13,16 @@ class GridTool:
         # Load grdecl file
         self.grid = Grid.load_from_grdecl(filename)
 
-        # Reshape to something sensible 
+        # Load ZCORN; shape = (nz, 2, ny, 2, nx, 2), where 0 and 1 in the 2-dimension ndices will give you top/bottom,
+        # north/south and east/west, respectively
         self.zcorn = np.reshape(self.grid.export_zcorn().numpy_copy(), 
                                 shape=(self.grid.nz, 2, self.grid.ny, 2, self.grid.nx, 2))
+
+        # Load COORD; shape = (ny + 1, nx + 1, 2, 3) with pillars starting in SW corner, the 2-dimenion index is
+        # top/bottom coordinates given by 3-dimension index
         self.coord = np.reshape(self.grid.export_coord().numpy_copy(), 
                                 shape=(self.grid.ny + 1, self.grid.nx + 1, 2, 3))
-        
+
         # Store fixed layer thickness
         self.layer_thick = fixed_layer_thickness
 
@@ -32,6 +36,10 @@ class GridTool:
         tiled_zcorn_bot = np.tile(self.zcorn[self.nz - 1, 1, :, :, :, :], (2, 1, 1, 1, 1))
         
         if self.layer_thick is None:
+            # If h is constant, and tile it to match zcorn shape
+            if h.ndim == 0:
+                h = np.tile(h, self.zcorn[k, :, :, :, :, :].shape)
+
             # Find cells that exceed top/bottom bounds
             top_grid_prob = self.zcorn[k, :, :, :, :, :] + h < tiled_zcorn_top
             bot_grid_prob = self.zcorn[k, :, :, :, :, :] + h > tiled_zcorn_bot
@@ -47,6 +55,10 @@ class GridTool:
             self.zcorn[k, no_prob] += h[no_prob]
             
         else:
+            # If h is constant, and tile it to match zcorn shape
+            if h.ndim == 0:
+                h = np.tile(h, self.zcorn[k, 0, :, :, :, :].shape)
+
             # Find cells that exceed top/bottom bounds.
             top_grid_prob = self.zcorn[k, 0, :, :, :, :] + h < tiled_zcorn_top[0]
             bot_grid_prob_0 = self.zcorn[k, 0, :, :, :, : ] + h > tiled_zcorn_bot[0]
@@ -175,7 +187,7 @@ class GridTool:
         # Use scipy.optimize.root to calculate at which r=(x,y) the intersection occurs
         xmid = (x1 + x2) / 2
         ymid = (y1 + y2) / 2
-        sol = scipy.optimize.root(f, x0=[xmid, ymid])
+        sol = scipy.optimize.minimize(f, x0=[xmid, ymid])
 
         return surf(sol.x[0], sol.x[1])
     
