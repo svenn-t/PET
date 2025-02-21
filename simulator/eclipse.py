@@ -1177,11 +1177,12 @@ class eclipse:
                         yFlow = self.ecl_case.summary_data(whichResponse, time)
                 elif whichResponse.upper() in ['PERMX', 'PERMY', 'PERMZ', 'PORO', 'NTG', 'SATNUM',
                                                'MULTNUM', 'OPERNUM']:
-                    yFlow = np.array([self.ecl_case.cell_data(whichResponse).flatten()[time]]) # assume that time is the index
+                    # assume that time is the index
+                    yFlow = np.array([self.ecl_case.cell_data(whichResponse).flatten()[time]])
                 else:
-                    yFlow = self.ecl_case.cell_data(whichResponse, time).flatten()
+                    yFlow = self.ecl_case.cell_data(whichResponse, time).flatten().data
                     if yFlow is None:
-                        yFlow = self.ecl_case.cell_data(whichResponse).flatten()
+                        yFlow = self.ecl_case.cell_data(whichResponse).flatten().data
 
             # store the run time. NB: elapsed must be defined in .DATA file for this to work
             if 'save_elapsed' in self.input_dict and len(self.run_time) <= member:
@@ -1237,9 +1238,9 @@ class eclipse:
                     if ext_data_info is not None:
                         yFlow = case.summary_data(whichResponse, time)
                 else:
-                    yFlow = case.cell_data(whichResponse, time).flatten()
+                    yFlow = case.cell_data(whichResponse, time).flatten().data
                     if yFlow is None:
-                        yFlow = case.cell_data(whichResponse).flatten()
+                        yFlow = case.cell_data(whichResponse).flatten().data
 
             # If we have performed coarsening, we store the number of active grid-cells
             if self.upscale is not None:
@@ -1251,7 +1252,7 @@ class eclipse:
                 if len(self.num_act) <= member:
                     self.num_act.extend([active_cells])
 
-        return yFlow.data
+        return yFlow
 
     def store_fwd_debug(self, assimstep):
         if 'fwddebug' in self.keys_fwd:
