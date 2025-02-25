@@ -9,7 +9,7 @@ _ORIENT = {'NW': (0, 1), 'NE': (1, 1), 'SW': (0, 0), 'SE': (1, 0)}
 
 
 class GridTool:
-    def __init__(self, filename, fixed_layer_thickness=None):
+    def __init__(self, filename):
         # Load grdecl file
         self.grid = Grid.load_from_grdecl(filename)
 
@@ -23,99 +23,119 @@ class GridTool:
         self.coord = np.reshape(self.grid.export_coord().numpy_copy(), 
                                 shape=(self.grid.ny + 1, self.grid.nx + 1, 2, 3))
 
-        # Store fixed layer thickness
-        self.layer_thick = fixed_layer_thickness
-
-    def move_zcorn_layer(self, k, h, redistribute=False):
+    def move_zcorn_layer(self, k_list, h_list, layer_thick=None, redistribute=False):
         """ 
         Move corners in a k-layer up/down according to a vector input h.
+        
         NOTE: if there is a fixed layer thickness, h must be shape = (nx, 2, ny, 2), otherwise shape = (2, nx, 2, ny, 2)
+
+        NOTE: we stack layers starting from k=0 to k_list[0]. If layer k_list[ind] has shallower zcorns than layer
+        k_list[ind - 1], the layer in k_list[ind] takes presidence, meaning it will persist and layer k_list[ind - 1]
+        will disappear (at the shallower zcorns) 
         """
-        # Add h to zcorn at layer k, but ensure that it does not exceed original grid bounds
-        tiled_zcorn_top = np.tile(self.zcorn[0, 0, :, :, :, :], (2, 1, 1, 1, 1))
+        # Check input
+        assert len(k_list) == len(h_list)
+        if layer_thick is None:
+            layer_thick = [None for _ in k_list]
+
+        # Tiled bottom zcorns for checks against exceeding grid boundary
         tiled_zcorn_bot = np.tile(self.zcorn[self.nz - 1, 1, :, :, :, :], (2, 1, 1, 1, 1))
         
-        if self.layer_thick is None:
-            # If h is constant, and tile it to match zcorn shape
-            if h.ndim == 0:
-                h = np.tile(h, self.zcorn[k, :, :, :, :, :].shape)
+        # Loop over k layers to move
+        for ind, (k, h) in enumerate(zip(k_list, h_list)):
+            # Tiled top zcorns for check against previous k_list layer or grid boundary
+            if ind == 0:
+                tiled_zcorn_top = np.tile(self.zcorn[0, 0, :, :, :, :], (2, 1, 1, 1, 1))
+            else:
+                tiled_zcorn_top = np.tile(self.zcorn[k_list[ind - 1], 1, :, :, :, :], (2, 1, 1, 1, 1))
 
-            # Find cells that exceed top/bottom bounds
-            top_grid_prob = self.zcorn[k, :, :, :, :, :] + h < tiled_zcorn_top
-            bot_grid_prob = self.zcorn[k, :, :, :, :, :] + h > tiled_zcorn_bot
+            # Add h to zcorn at layer k, but ensure that it does not exceed original grid boundary
+            if layer_thick[ind] is None:
+                # If h is constant, and tile it to match zcorn shape
+                if isinstance(h, float) or h.ndim == 0:
+                    h = np.tile(h, self.zcorn[k, :, :, :, :, :].shape)
 
-            # Set exceeding cells to bounding zcorn values
-            if np.any(top_grid_prob):
-                self.zcorn[k, top_grid_prob] = tiled_zcorn_top[top_grid_prob]
-            if np.any(bot_grid_prob):
-                self.zcorn[k, bot_grid_prob] = tiled_zcorn_bot[bot_grid_prob]
-            
-            # Change cells with h for cells that have not exceeded bounds
-            no_prob = np.logical_and(~top_grid_prob, ~bot_grid_prob)
-            self.zcorn[k, no_prob] += h[no_prob]
-            
-        else:
-            # If h is constant, and tile it to match zcorn shape
-            if h.ndim == 0:
-                h = np.tile(h, self.zcorn[k, 0, :, :, :, :].shape)
+                # Find cells that exceed top/bottom limit
+                top_grid_prob = self.zcorn[k, :, :, :, :, :] + h < tiled_zcorn_top
+                bot_grid_prob = self.zcorn[k, :, :, :, :, :] + h > tiled_zcorn_bot
 
-            # Find cells that exceed top/bottom bounds.
-            top_grid_prob = self.zcorn[k, 0, :, :, :, :] + h < tiled_zcorn_top[0]
-            bot_grid_prob_0 = self.zcorn[k, 0, :, :, :, : ] + h > tiled_zcorn_bot[0]
-            bot_grid_prob_1 = self.zcorn[k, 0, :, :, :, :] + h + self.layer_thick > tiled_zcorn_bot[0]
+                # Set exceeding cells to bounding zcorn values
+                if np.any(top_grid_prob):
+                    self.zcorn[k, top_grid_prob] = tiled_zcorn_top[top_grid_prob]
+                if np.any(bot_grid_prob):
+                    self.zcorn[k, bot_grid_prob] = tiled_zcorn_bot[bot_grid_prob]
+                
+                # Change cells with h that have not exceeded limits
+                no_prob = np.logical_and(~top_grid_prob, ~bot_grid_prob)
+                self.zcorn[k, no_prob] += h[no_prob]
+                
+            else:
+                # If h is constant, and tile it to match zcorn shape
+                if isinstance(h, float) or h.ndim == 0:
+                    h = np.tile(h, self.zcorn[k, 0, :, :, :, :].shape)
 
-            #Set exceeding cells to bounding zcorn values
-            if np.any(top_grid_prob):
-                self.zcorn[k, 0, top_grid_prob] = tiled_zcorn_top[0, top_grid_prob]
-            if np.any(bot_grid_prob_0):
-                self.zcorn[k, 0, bot_grid_prob_0] = tiled_zcorn_bot[0, bot_grid_prob_0]
-            if np.any(bot_grid_prob_1):
-                self.zcorn[k, 1, bot_grid_prob_1] = tiled_zcorn_bot[0, bot_grid_prob_1]
-            
-            #Change cells with h and layer_thick (constant) for cells that have not exceeded bounds
-            no_prob_0 = np.logical_and(~top_grid_prob, ~bot_grid_prob_0)
-            self.zcorn[k, 0, no_prob_0] += h[no_prob_0]
-            self.zcorn[k, 1, ~bot_grid_prob_1] = self.zcorn[k, 0, ~bot_grid_prob_1] + self.layer_thick
+                # Find cells that exceed top/bottom boundary
+                top_grid_prob = self.zcorn[k, 0, :, :, :, :] + h < tiled_zcorn_top[0]
+                bot_grid_prob_0 = self.zcorn[k, 0, :, :, :, : ] + h > tiled_zcorn_bot[0]
+                bot_grid_prob_1 = self.zcorn[k, 0, :, :, :, :] + h + layer_thick[ind] > tiled_zcorn_bot[0]
 
-        # Redistribute zcorns above and below layer k
-        if redistribute:
-            # Layers over layer k
-            h_over = (self.zcorn[0, 0, :, :, :, :] - self.zcorn[k, 0, :, :, :, :]) / k
+                # Set exceeding cells to bounding zcorn values
+                if np.any(top_grid_prob):
+                    self.zcorn[k, 0, top_grid_prob] = tiled_zcorn_top[0, top_grid_prob]
+                if np.any(bot_grid_prob_0):
+                    self.zcorn[k, 0, bot_grid_prob_0] = tiled_zcorn_bot[0, bot_grid_prob_0]
+                if np.any(bot_grid_prob_1):
+                    self.zcorn[k, 1, bot_grid_prob_1] = tiled_zcorn_bot[0, bot_grid_prob_1]
+                
+                # Change cells with h and layer_thick (constant) for cells that have not exceeded bounds
+                no_prob_0 = np.logical_and(~top_grid_prob, ~bot_grid_prob_0)
+                self.zcorn[k, 0, no_prob_0] += h[no_prob_0]
+                self.zcorn[k, 1, ~bot_grid_prob_1] = self.zcorn[k, 0, ~bot_grid_prob_1] + layer_thick[ind]
 
-            # Loop over layers and add h_over to zcorn at top of layer k
-            for i, layer in enumerate(range(k - 1, -1, -1)):
-                self.zcorn[layer, 0, :, :, :, :] = self.zcorn[k, 0, :, :, :, :] + (i + 1) * h_over
-                self.zcorn[layer, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :] + i * h_over
+            # Redistribute zcorns layers between k_list layers or, in case of first and last k_list-layers, the grid
+            # boundaries
+            if redistribute:
+                # Layers above layer k up to layer k - 1 or 0
+                k_over = k_list[ind - 1] + 1 if ind > 0 else 0
+                k_compare = k_list[ind - 1] if ind > 0 else 0
+                bottom = int(ind > 0)
+                h_over = (self.zcorn[k_compare, bottom, :, :, :, :] - self.zcorn[k, 0, :, :, :, :]) / (k - k_over)
 
-            # Layers below layer k
-            h_bel = (self.zcorn[self.nz - 1, 1, :, :, :, :] - self.zcorn[k, 1, :, :, :, :]) / (self.nz - k - 1)
+                # Loop over layers and add h_over to zcorn at top of layer k
+                for i, layer in enumerate(range(k - 1, k_over - 1, -1)):
+                    self.zcorn[layer, 0, :, :, :, :] = self.zcorn[k, 0, :, :, :, :] + (i + 1) * h_over
+                    self.zcorn[layer, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :] + i * h_over
 
-            # Loop over layers below and add h_bel
-            for i, layer in enumerate(range(k + 1, self.nz)):
-                self.zcorn[layer, 0, :, :, :, :] = self.zcorn[k, 1, :, :, :, :] + i * h_bel
-                self.zcorn[layer, 1, :, :, :, :] = self.zcorn[k, 1, :, :, :, :] + (i + 1) * h_bel
+                # Layers below last layer k
+                if ind == len(k_list) - 1:
+                    h_bel = (self.zcorn[self.nz - 1, 1, :, :, :, :] - self.zcorn[k, 1, :, :, :, :]) / (self.nz - 1 - k)
 
-        # Move top and bottom of layers k + 1 and k - 1 to align with layer k
-        else:
-            # Additionally, move bottom corners in layer above (k - 1) and top corners in layer below (k + 1)
-            self.zcorn[k - 1, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :]
-            self.zcorn[k + 1, 0, :, :, :, :] = self.zcorn[k, 1, :, :, :, :]
-            
-            # Check if adding h leads to problems
-            top_prob = self.zcorn[k - 1, 1, :, :, :, :] < self.zcorn[k - 1, 0, :, :, :, :]
-            bot_prob = self.zcorn[k + 1, 0, :, :, :, :] > self.zcorn[k + 1, 1, :, :, :, :]
+                    # Loop over layers below and add h_bel
+                    for i, layer in enumerate(range(k + 1, self.nz)):
+                        self.zcorn[layer, 0, :, :, :, :] = self.zcorn[k, 1, :, :, :, :] + i * h_bel
+                        self.zcorn[layer, 1, :, :, :, :] = self.zcorn[k, 1, :, :, :, :] + (i + 1) * h_bel
 
-            # # Set problematic zcorn to bounds
-            if np.any(top_prob):
-                warnings.warn(f'Top ZCORN values in layer {k} intersects with top values in {k - 1}. '
-                            'Adjusting problematic ZCORNS values to coincide!')
-                self.zcorn[k, 0, top_prob] = self.zcorn[k - 1, 0, top_prob]
-                self.zcorn[k - 1, 1, top_prob] = self.zcorn[k - 1, 0, top_prob]
-            if np.any(bot_prob):
-                warnings.warn(f'Bottom ZCORN values in layer {k} intersects with bottom values in {k + 1}. '
-                            'Adjusting problematic ZCORNS values to coincide!')
-                self.zcorn[k, 1, bot_prob] = self.zcorn[k + 1, 1, bot_prob]
-                self.zcorn[k + 1, 0, bot_prob] = self.zcorn[k + 1, 1, bot_prob]
+            # Only move top and bottom of layers k + 1 and k - 1 to align with layer k
+            else:
+                # Additionally, move bottom corners in layer above (k - 1) and top corners in layer below (k + 1)
+                self.zcorn[k - 1, 1, :, :, :, :] = self.zcorn[k, 0, :, :, :, :]
+                self.zcorn[k + 1, 0, :, :, :, :] = self.zcorn[k, 1, :, :, :, :]
+                
+                # Check if adding h leads to problems
+                top_prob = self.zcorn[k - 1, 1, :, :, :, :] < self.zcorn[k - 1, 0, :, :, :, :]
+                bot_prob = self.zcorn[k + 1, 0, :, :, :, :] > self.zcorn[k + 1, 1, :, :, :, :]
+
+                # # Set problematic zcorn to bounds
+                if np.any(top_prob):
+                    warnings.warn(f'Top ZCORN values in layer {k} intersects with top values in {k - 1}. '
+                                  'Adjusting problematic ZCORNS values to coincide!')
+                    self.zcorn[k, 0, top_prob] = self.zcorn[k - 1, 0, top_prob]
+                    self.zcorn[k - 1, 1, top_prob] = self.zcorn[k - 1, 0, top_prob]
+                if np.any(bot_prob):
+                    warnings.warn(f'Bottom ZCORN values in layer {k} intersects with bottom values in {k + 1}. '
+                                  'Adjusting problematic ZCORNS values to coincide!')
+                    self.zcorn[k, 1, bot_prob] = self.zcorn[k + 1, 1, bot_prob]
+                    self.zcorn[k + 1, 0, bot_prob] = self.zcorn[k + 1, 1, bot_prob]
 
     def move_zcorn_single(self, i, j, k, h, orient, bottom):
         """

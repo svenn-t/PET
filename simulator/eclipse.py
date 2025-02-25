@@ -279,11 +279,11 @@ class eclipse:
 
         # Structure k-layer to adjust (OBS: Python 0-indexing vs Fortran/Eclipse 1-indexing)
         if 'k_layer' in self.input_dict:
-            self.k_layer = int(self.input_dict['k_layer']) - 1
+            self.k_layer = [int(k) - 1 for k in self.input_dict['k_layer']]
         
         # Fixed structure k-layer thickness
         if 'k_layer_thick' in self.input_dict:
-            self.k_layer_thick = self.input_dict['k_layer_thick']
+            self.k_layer_thick = [x if x >= 0 else None for x in self.input_dict['k_layer_thick']]
         
         # Structure template grdecl file
         if 'grdecl_file' in self.input_dict:
@@ -897,7 +897,7 @@ class eclipse:
     
     def make_grdecl_from_structure(self, state, folder):
         # Instantiate the GridTool class
-        gt = GridTool(self.grdecl_file, fixed_layer_thickness=self.k_layer_thick)
+        gt = GridTool(self.grdecl_file)
 
         # If h is not a state variable, we must calculate intersections between surface and pillars 
         if 'h' not in state:
@@ -966,10 +966,10 @@ class eclipse:
         
         # h is a state variable
         else:
-            h = state['h'][0]
+            h = state['h'].tolist()
 
         # Adjust zcorn in layer k
-        gt.move_zcorn_layer(self.k_layer, h, redistribute=self.redistribute_layers)
+        gt.move_zcorn_layer(self.k_layer, h, self.k_layer_thick, redistribute=self.redistribute_layers)
 
         # Write GRDECL file
         self._write_grdecl(gt, folder)
@@ -1171,6 +1171,7 @@ class eclipse:
                     # If well, read the rsm file
                     if ext_data_info is not None:  # Get the data at a specific well and time
                         yFlow = self.ecl_case.summary_data(whichResponse, time)
+                        yFlow[np.isnan(yFlow)] = 0.0
             elif len(whichResponse.split(' ')) == 1:  # field data
                 if whichResponse.upper() in ['FOPT', 'FWPT', 'FGPT', 'FWIT', 'FGIT']:
                     if ext_data_info is not None:
