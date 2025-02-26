@@ -17,6 +17,7 @@ import time
 from functools import partial
 from resdata import ResDataType
 from resdata.resfile import ResdataKW
+from resdata.grid import Grid
 import cwrap
 # import rips
 
@@ -101,6 +102,7 @@ class eclipse:
         self.fixed_struct_z0 = None
         self.redistribute_layers = False
         self.surface = None
+        self.xyz_interp = None
 
         # If input option 1 is selected
         if self.input_dict is not None:
@@ -322,6 +324,10 @@ class eclipse:
             self.x0 = self.input_dict['x0']
         if 'y0' in self.input_dict:
             self.y0 = self.input_dict['y0']
+
+        # Interpolation points
+        if 'xyz_interp' in self.input_dict:
+            self.xyz_interp = np.load(self.input_dict['xyz_interp'])
 
     def setup_fwd_run(self, **kwargs):
         """
@@ -1167,11 +1173,27 @@ class eclipse:
                             yFlow = np.append(yFlow, interp(d))
                     except:
                         yFlow = rft_prop
+
+                elif whichResponse.split(' ')[0] == 'interp':
+                    # Get property to interpolate
+                    prop = whichResponse.split(' ')[1]
+
+                    # Get cell data
+                    data = self.ecl_case.cell_data(prop, time)
+
+                    # Get grid data
+                    grid = Grid(f'En_{member}{os.sep}{self.file}.EGRID')
+                    xyz_act = np.array([grid.get_xyz(active_index=i) for i in range(grid.get_num_active())])
+
+                    # Interplote
+                    yFlow = interpolate.griddata(xyz_act, data[~data.mask], self.xyz_interp)
+
                 else:
                     # If well, read the rsm file
                     if ext_data_info is not None:  # Get the data at a specific well and time
                         yFlow = self.ecl_case.summary_data(whichResponse, time)
                         yFlow[np.isnan(yFlow)] = 0.0
+                        
             elif len(whichResponse.split(' ')) == 1:  # field data
                 if whichResponse.upper() in ['FOPT', 'FWPT', 'FGPT', 'FWIT', 'FGIT']:
                     if ext_data_info is not None:
