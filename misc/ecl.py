@@ -725,6 +725,7 @@ class EclipseData (object):
         with EclipseFile(self.root, 'SMSPEC') as store:
             mnemonic = store.get('KEYWORDS')
             well = store.get('WGNAMES')
+            nums = store.get('NUMS')
 
         # split the propname
         prop_elem = propname.upper().split()
@@ -741,8 +742,11 @@ class EclipseData (object):
             # find all indexes for the mnemonic
             tmp_ind = numpy.where(mnemonic == prop_elem[0])
 
-            # fine all indexes for the well
-            tmp_ind2 = numpy.where(well == prop_elem[1])
+            # find all indexes for the well
+            if prop_elem[0].startswith('R') or prop_elem[0].startswith('B'):
+                tmp_ind2 = numpy.where(nums == int(prop_elem[1]))
+            else:
+                tmp_ind2 = numpy.where(well == prop_elem[1])
 
             # only one element is equal
             ind = tmp_ind[0][numpy.array(

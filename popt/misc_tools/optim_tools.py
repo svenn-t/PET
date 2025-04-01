@@ -364,7 +364,7 @@ def get_optimize_result(obj):
     return save_dict
 
 
-def save_optimize_results(intermediate_result):
+def save_optimize_results(intermediate_result, final=False):
     """
     Save optimize results
 
@@ -392,7 +392,11 @@ def save_optimize_results(intermediate_result):
         suffix = now.strftime("%m_%d_%Y_%H_%M_%S")
 
     # Save the variables
-    if 'epf_iteration' in intermediate_result:
-        np.savez(save_folder + '/optimize_result_{0}_{1}'.format(suffix, str(intermediate_result['epf_iteration'])), **intermediate_result)
+    if final:
+        np.savez('final_optimize_result', **intermediate_result)
     else:
-        np.savez(save_folder + '/optimize_result_{0}'.format(suffix), **intermediate_result)
+        if 'epf_iteration' in intermediate_result:
+            np.savez(save_folder + '/optimize_result_{0}_{1}'. \
+                     format(suffix, str(intermediate_result['epf_iteration'])), **intermediate_result)
+        else:
+            np.savez(save_folder + '/optimize_result_{0}'.format(suffix), **intermediate_result)

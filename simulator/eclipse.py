@@ -72,8 +72,11 @@ class eclipse:
         self.input_dict = input_dict
         self.file = filename
         self.options = options
-
+        
+        # Default
         self.upscale = None
+        self.run_folder = 'En_'
+
         # If input option 1 is selected
         if self.input_dict is not None:
             self._extInfoInputDict()
@@ -105,6 +108,10 @@ class eclipse:
         self.true_order = [self.input_dict['reporttype'], self.input_dict['reportpoint']]
         self.all_data_types = self.input_dict['datatype']
         self.l_prim = [int(i) for i in range(len(self.true_prim[1]))]
+
+        # Change folder where simulations are run
+        if 'run_folder' in self.input_dict:
+            self.run_folder = self.input_dict['run_folder']
 
         # In the ecl framework, all reference to the filename should be uppercase
         self.file = self.input_dict['runfile'].upper()
@@ -287,8 +294,8 @@ class eclipse:
             state['level'] = self.level
         else:
             state['level'] = -1  # default value
-        os.mkdir('En_' + str(member_i))
-        folder = 'En_' + str(member_i) + os.sep
+        os.mkdir(self.run_folder + str(member_i))
+        folder = self.run_folder + str(member_i) + os.sep
 
         state['member'] = member_i
         # If the run is upscaled, run the upscaling procedure
@@ -339,10 +346,10 @@ class eclipse:
                 return False
 
     def remove_folder(self, member):
-        folder = 'En_' + str(member) + os.sep
+        folder = self.run_folder + str(member) + os.sep
         try:
             rmtree(folder)  # Try to delete folder
-        except:  # If deleting fails, just rename to 'En_<ensembleMember>_date'
+        except:  # If deleting fails, just rename to 'self.run_folder + <ensembleMember>_date'
             os.rename(folder, folder + '_' +
                       dt.datetime.now().strftime("%m-%d-%Y_%H-%M-%S"))
 
@@ -837,9 +844,9 @@ class eclipse:
                 # En_XX/YYYY.DATA is the folder setup
                 rt_mem = int(self.ecl_case.root.split('/')[0].split('_')[1])
                 if rt_mem != member:  # wrong case
-                    self.ecl_case = ecl.EclipseCase('En_' + str(member) + os.sep + self.file + '.DATA')
+                    self.ecl_case = ecl.EclipseCase(self.run_folder + str(member) + os.sep + self.file + '.DATA')
             else:
-                self.ecl_case = ecl.EclipseCase('En_' + str(member) + os.sep + self.file + '.DATA')
+                self.ecl_case = ecl.EclipseCase(self.run_folder + str(member) + os.sep + self.file + '.DATA')
             if ext_data_info[0] == 'days':
                 time = dt.datetime(self.startDate['year'], self.startDate['month'], self.startDate['day']) + \
                     dt.timedelta(days=ext_data_info[1])
@@ -862,10 +869,10 @@ class eclipse:
                     if hasattr(self, 'rft_case'):
                         rt_mem = int(self.rft_case.root.split('/')[0].split('_')[1])
                         if rt_mem != member:
-                            self.rft_case = ecl.EclipseRFT('En_' + str(member) + os.sep + self.file)
+                            self.rft_case = ecl.EclipseRFT(self.run_folder + str(member) + os.sep + self.file)
                     else:
                         self.rft_case = ecl.EclipseRFT(
-                            'En_' + str(member) + os.sep + self.file)
+                            self.run_folder + str(member) + os.sep + self.file)
                     # Get the data. Due to formating we can slice the property.
                     rft_prop = self.rft_case.rft_data(well=whichResponse.split(
                         ' ')[1], prop=whichResponse.split(' ')[0][4:])
@@ -891,7 +898,7 @@ class eclipse:
                     if ext_data_info is not None:  # Get the data at a specific well and time
                         yFlow = self.ecl_case.summary_data(whichResponse, time)
             elif len(whichResponse.split(' ')) == 1:  # field data
-                if whichResponse.upper() in ['FOPT', 'FWPT', 'FGPT', 'FWIT', 'FGIT']:
+                if whichResponse.upper() in ['FOPT', 'FWPT', 'FGPT', 'FWIT', 'FGIT', 'FGIP']:
                     if ext_data_info is not None:
                         yFlow = self.ecl_case.summary_data(whichResponse, time)
                 elif whichResponse.upper() in ['PERMX', 'PERMY', 'PERMZ', 'PORO', 'NTG', 'SATNUM',
@@ -909,7 +916,7 @@ class eclipse:
             # If we have performed coarsening, we store the number of active grid-cells
             if self.upscale is not None:
                 # Get this number from INIT file
-                with ecl.EclipseFile('En_' + str(member) + os.sep + self.file, 'INIT') as case:
+                with ecl.EclipseFile(self.run_folder + str(member) + os.sep + self.file, 'INIT') as case:
                     intHead = case.get('INTEHEAD')
                 # The active cell is element 12 of this vector, index 11 in python indexing...
                 active_cells = intHead[11]
@@ -963,7 +970,7 @@ class eclipse:
             # If we have performed coarsening, we store the number of active grid-cells
             if self.upscale is not None:
                 # Get this number from INIT file
-                with ecl.EclipseFile('En_' + str(member) + os.sep + self.file,'INIT') as case:
+                with ecl.EclipseFile(self.run_folder + str(member) + os.sep + self.file,'INIT') as case:
                     intHead = case.get('INTEHEAD')
                 # The active cell is element 12 of this vector, index 11 in python indexing...
                 active_cells = intHead[11]

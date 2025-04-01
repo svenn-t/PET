@@ -64,7 +64,11 @@ class Ensemble:
         self.logger = logging.getLogger('PET')
 
         # Check if folder contains any En_ files, and remove them!
-        for folder in glob('En_*'):
+        if hasattr(self.sim, 'run_folder'):
+            run_folder = self.sim.run_folder
+        else:
+            run_folder = 'En_'
+        for folder in glob(f'{run_folder}*'):
             try:
                 if len(folder.split('_')) == 2:
                     int(folder.split('_')[1])
@@ -477,7 +481,7 @@ class Ensemble:
             self.cov_prior[name] = cov
         
         # Save the ensemble for later inspection
-        np.savez('prior.npz', **self.state)
+        # np.savez('prior.npz', **self.state)
 
     def get_list_assim_steps(self):
         """

@@ -109,21 +109,27 @@ class EnOpt(Optimize):
         self.state_step = 0  # state step
         self.cov_step = 0  # covariance step
 
+        self.log_format = '  {:^11d} {:^11d} {:^17.5g} {:^17.5g} {:^17.5g} {:^17.5g}'
+        self.log_format0 = '  {:^11d} {:^11} {:^17.5g} {:^17.5} {:^17.5} {:^17.5}'
+
         # Calculate objective function of startpoint
         if not self.restart:
             self.start_time = time.perf_counter()
             self.obj_func_values = self.fun(self.mean_state, **self.epf)
             self.nfev += 1
             self.optimize_result = ot.get_optimize_result(self)
-            ot.save_optimize_results(self.optimize_result)
-            if self.logger is not None:
-                self.logger.info('\n\n')
-                self.logger.info('       ====== Running optimization - EnOpt ======')
-                self.logger.info('\n'+pprint.pformat(self.options))
-                info_str = '       {:<10} {:<10} {:<15} {:<15} {:<15} '.format('iter', 'alpha_iter',
-                                                                        'obj_func', 'step-size', 'cov[0,0]')
-                self.logger.info(info_str)
-                self.logger.info('       {:<21} {:<15.4e}'.format(self.iteration, np.mean(self.obj_func_values)))
+            if self.options.get('save_intermediate', False):
+                ot.save_optimize_results(self.optimize_result)
+            # if self.logger is not None:
+            #     self.logger.info('\n\n')
+            #     self.logger.info('       ====== Running optimization - EnOpt ======')
+            #     self.logger.info('\n'+pprint.pformat(self.options))
+            #     info_str = '  {:^11} {:^11} {:^17} {:^17} {:^17} {:^17} '.format('iter', 'alpha_iter',
+            #                                                             'obj_func', '||step||_2', 'alpha', 
+            #                                                             'cov[0,0]')
+            #     self.logger.info(info_str)
+            #     self.logger.info(self.log_format0.format(self.iteration, '-', np.mean(self.obj_func_values), '-', 
+            #                                             '-', '-'))
 
         # Initialize optimizer
         optimizer = __set__variable('optimizer', 'GA')
@@ -139,6 +145,32 @@ class EnOpt(Optimize):
 
         # The EnOpt class self-ignites, and it is possible to send the EnOpt class as a callale method to scipy.minimize
         self.run_loop()  # run_loop resides in the Optimization class (super)
+
+        # Run obj func with and without constraints
+        obj_func_values_with_con = self.fun(self.mean_state, **self.epf)
+        self.final_obj_func_values = self.fun(self.mean_state)
+        self.final_cons_values = np.sqrt((obj_func_values_with_con - self.final_obj_func_values) / self.epf['r'] * 2)
+
+        # Save final result
+        # optimize_result = ot.get_optimize_result(self)
+        # if self.options.get('save_final', False):
+        #     ot.save_optimize_results(optimize_result, final=True)
+        # return optimize_result
+
+        # Return obj. func. value of last update (without constraints)
+        # return self.fun(self.mean_state)
+
+    def get_final_obj_func_values(self):
+        return self.final_obj_func_values
+    
+    def get_final_cons_values(self):
+        return self.final_cons_values
+    
+    def get_obj_func_values(self):
+        return self.obj_func_values
+    
+    def get_mean_state(self):
+        return self.mean_state
 
     def calc_update(self):
         """
@@ -201,11 +233,11 @@ class EnOpt(Optimize):
                     self.cov = ot.get_sym_pos_semidef(self.cov)
 
                     # Write logging info
-                    if self.logger is not None:
-                        info_str_iter = '       {:<10} {:<10} {:<15.4e} {:<15.2e} {:<15.2e}'.\
-                            format(self.iteration, alpha_iter, np.mean(self.obj_func_values),
-                                    self.alpha, self.cov[0, 0])
-                        self.logger.info(info_str_iter)
+                    # if self.logger is not None:
+                    #     info_str_iter = self.log_format.\
+                    #         format(self.iteration, alpha_iter, np.mean(self.obj_func_values), np.linalg.norm(new_step),
+                    #                 self.alpha, self.cov[0, 0])
+                    #     self.logger.info(info_str_iter)
 
                     # Update step size in the one-dimensional case
                     if new_state.size == 1 and hasattr(self.optimizer, 'step_size'):
@@ -218,7 +250,8 @@ class EnOpt(Optimize):
 
                     # Save variables defined in savedata keyword.
                     self.optimize_result = ot.get_optimize_result(self)
-                    ot.save_optimize_results(self.optimize_result)
+                    if self.options.get('save_intermediate', False):
+                        ot.save_optimize_results(self.optimize_result)
 
                     # Update iteration counter if iteration was successful and save current state
                     self.iteration += 1
