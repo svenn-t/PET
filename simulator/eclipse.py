@@ -902,8 +902,8 @@ class eclipse:
                     if ext_data_info is not None:
                         yFlow = self.ecl_case.summary_data(whichResponse, time)
                 elif whichResponse.upper() in ['PERMX', 'PERMY', 'PERMZ', 'PORO', 'NTG', 'SATNUM',
-                                               'MULTNUM', 'OPERNUM']:
-                    yFlow = np.array([self.ecl_case.cell_data(whichResponse).flatten()[time]]) # assume that time is the index
+                                               'MULTNUM', 'OPERNUM', 'DEPTH']:
+                    yFlow = self.ecl_case.cell_data(whichResponse).flatten()
                 else:
                     yFlow = self.ecl_case.cell_data(whichResponse, time).flatten()
                     if yFlow is None:
