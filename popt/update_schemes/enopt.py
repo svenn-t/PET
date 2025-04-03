@@ -120,16 +120,16 @@ class EnOpt(Optimize):
             self.optimize_result = ot.get_optimize_result(self)
             if self.options.get('save_intermediate', False):
                 ot.save_optimize_results(self.optimize_result)
-            # if self.logger is not None:
-            #     self.logger.info('\n\n')
-            #     self.logger.info('       ====== Running optimization - EnOpt ======')
-            #     self.logger.info('\n'+pprint.pformat(self.options))
-            #     info_str = '  {:^11} {:^11} {:^17} {:^17} {:^17} {:^17} '.format('iter', 'alpha_iter',
-            #                                                             'obj_func', '||step||_2', 'alpha', 
-            #                                                             'cov[0,0]')
-            #     self.logger.info(info_str)
-            #     self.logger.info(self.log_format0.format(self.iteration, '-', np.mean(self.obj_func_values), '-', 
-            #                                             '-', '-'))
+            if self.log_to_screen:
+                self.logger.info('\n\n')
+                self.logger.info('       ====== Running optimization - EnOpt ======')
+                self.logger.info('\n'+pprint.pformat(self.options))
+                info_str = '  {:^11} {:^11} {:^17} {:^17} {:^17} {:^17} '.format('iter', 'alpha_iter',
+                                                                        'obj_func', '||step||_2', 'alpha', 
+                                                                        'cov[0,0]')
+                self.logger.info(info_str)
+                self.logger.info(self.log_format0.format(self.iteration, '-', np.mean(self.obj_func_values), '-', 
+                                                        '-', '-'))
 
         # Initialize optimizer
         optimizer = __set__variable('optimizer', 'GA')
@@ -233,11 +233,11 @@ class EnOpt(Optimize):
                     self.cov = ot.get_sym_pos_semidef(self.cov)
 
                     # Write logging info
-                    # if self.logger is not None:
-                    #     info_str_iter = self.log_format.\
-                    #         format(self.iteration, alpha_iter, np.mean(self.obj_func_values), np.linalg.norm(new_step),
-                    #                 self.alpha, self.cov[0, 0])
-                    #     self.logger.info(info_str_iter)
+                    if self.log_to_screen:
+                        info_str_iter = self.log_format.\
+                            format(self.iteration, alpha_iter, np.mean(self.obj_func_values), np.linalg.norm(new_step),
+                                    self.alpha, self.cov[0, 0])
+                        self.logger.info(info_str_iter)
 
                     # Update step size in the one-dimensional case
                     if new_state.size == 1 and hasattr(self.optimizer, 'step_size'):
